@@ -1,0 +1,57 @@
+[
+    {
+        "type": "function",
+        "function": {
+            "name": "edit_file",
+            "description": "Apply changes to a file using the OpenAI patch format",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "path": {
+                        "type": "string",
+                        "description": "Path to the file relative to project root"
+                    },
+                    "diff": {
+                        "type": "string",
+                        "description": "Patch in OpenAI format:\n*** Begin Patch\n*** Add File: path/to/new/file\n+content line 1\n+content line 2\n*** End Patch\n\nFor editing existing files:\n*** Begin Patch\n*** Update File: path/to/file\n@@\n context line\n-removed line\n+added line\n*** End Patch"
+                    }
+                },
+                "required": ["path", "diff"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "feature_complete",
+            "description": "Call this ONLY when all behaviors from the task description are covered by passing tests and no more failing tests can be added. This ends the TDD session.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "summary": {
+                        "type": "string",
+                        "description": "List of behaviors that are now covered"
+                    }
+                },
+                "required": ["summary"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "done",
+            "description": "Call this when your task is complete and no more actions are needed.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "summary": {
+                        "type": "string",
+                        "description": "Brief summary of what was done"
+                    }
+                },
+                "required": ["summary"]
+            }
+        }
+    }
+]

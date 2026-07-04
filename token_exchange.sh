@@ -1,5 +1,8 @@
 #!/bin/bash
 
+WORKING_DIR="$(pwd)"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
 AUTH_TOKEN_PATH=~/.config/github-copilot/hosts.json
 VSCODE_CLIENT_ID="Iv1.b507a08c87ecfe98";
 
@@ -48,7 +51,7 @@ echo "GitHub Copilot token exchange successful"
 echo "Expires at: $EXPIRES_AT"
 
 echo "Set data in temp file"
-TEMP_FILE="./copilot_token.json"
+TEMP_FILE="$SCRIPT_DIR/copilot_token.json"
 
 if [ -f "$TEMP_FILE" ]; then
     echo "Temp file already exists, removing it"

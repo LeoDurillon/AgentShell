@@ -1,71 +1,137 @@
 #!/bin/bash
 
-MODEL="gpt-5-mini"
-ENDPOINT="https://api.individual.githubcopilot.com"
-EDITOR_VERSION="vscode/1.107.0";
-EDITOR_PLUGIN_VERSION="copilot-chat/0.35.0";
-INTEGRATION_ID="vscode-chat";
-USER_AGENT="GitHubCopilotChat/0.35.0"
-TEMP_FILE="./copilot_token.json"
-TOKEN=$(jq -r '.token' "$TEMP_FILE")
-EXPIRES_AT=$(jq -r '.expires_at' "$TEMP_FILE")
-NOW=$(date +%s)
+WORKING_DIR="$(pwd)"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+CONV_DIR="$SCRIPT_DIR/conversations"
+mkdir -p "$CONV_DIR"
 
 
-
-if [ "$#" -lt 2 ]; then
-    echo "Usage: $0 <system prompt> <file1> [file2 ...]"
-    exit 1
-fi
-
-if [ "$NOW" -ge "$EXPIRES_AT" ]; then
-    echo "❌ Token expiré depuis $(( (NOW - EXPIRES_AT) / 60 )) minutes. Lance: ./token_exchange.sh" >&2
-    exit 1
-fi
-SYSTEM_PROMPT="$1"
-shift
-
-# Construire le tableau de messages avec jq
-# jq --rawfile lit le fichier en entier et gère tous les caractères spéciaux
-MESSAGES=$(jq -n --arg system "$SYSTEM_PROMPT" '[ { role: "system", content: $system } ]')
-
-for file in "$@"; do
-    if [ ! -f "$file" ]; then
-        echo "File not found: $file"
-        exit 1
+load_messages() {
+    local conv_id="$1"
+    local conv_file="$CONV_DIR/$conv_id.json"
+    echo "🔄 Loading conversation: $conv_id" > /dev/tty
+    if [[ -f "$conv_file" ]]; then
+        cat "$conv_file"
     fi
-    # --rawfile injecte le contenu brut du fichier sans aucun échappement manuel
-    MESSAGES=$(echo "$MESSAGES" | jq \
-        --arg path "$file" \
-        --rawfile content "$file" \
-        '. += [{ role: "user", content: ("<file path=\"\($path)\">\n```\n\($content)```\n</file>") }]')
-done
 
-# Construire le body final avec jq
-BODY=$(jq -n \
-    --arg model "$MODEL" \
-    --argjson messages "$MESSAGES" \
-    '{
-        model: $model,
-        messages: $messages,
-        stream: true,
-        temperature: 0.2
-    }')
+}
 
+build_messages_with_files() {
+    local base_messages="$1"
+    local prompt="$2"
+    shift 2
+    local files=("$@")
+    if ! printf '%s' "$base_messages" | jq -e . >/dev/null 2>&1; then
+        base_messages=$(jq -n --arg system "$base_messages" \
+            '[{ role: "system", content: $system }]')
+    fi
 
-curl -sS -N -X POST "$ENDPOINT/chat/completions" \
-    -H "Content-Type: application/json" \
-    -H "Authorization: Bearer $TOKEN" \
-    -H "User-Agent: $USER_AGENT" \
-    -H "Editor-Version: $EDITOR_VERSION" \
-    -H "Editor-Plugin-Version: $EDITOR_PLUGIN_VERSION" \
-    -H "Copilot-Integration-Id: $INTEGRATION_ID" \
-    -d "$BODY" \
-| while IFS= read -r line; do
-    [[ -z "$line" || "$line" == "data: [DONE]" ]] && continue
-    [[ "${line:0:6}" != "data: " ]] && continue
-    json="${line#data: }"
-    chunk=$(printf '%s' "$json" | jq -rj 'select(.choices[0].delta.content != null) | .choices[0].delta.content' 2>/dev/null)
-    [[ -n "$chunk" ]] && printf '%s' "$chunk"
-done
-echo
+    local messages="$base_messages"
+
+    # Injecter les fichiers comme messages user séparés
+    for file in "${files[@]}"; do
+        if [[ -f "$file" ]]; then
+            messages=$(printf '%s' "$messages" | jq \
+                --arg path "$file" \
+                --rawfile content "$file" \
+                '. += [{
+                    role: "user",
+                    content: "<file path=\"\($path)\">\n```\n\($content)```\n</file>"
+                }]')
+        else
+            echo "⚠️  File not found, skipping: $file" >&2
+        fi
+    done
+
+    # Ajouter le prompt utilisateur après les fichiers
+    messages=$(printf '%s' "$messages" | jq \
+        --arg prompt "$prompt" \
+        '. += [{ role: "user", content: $prompt }]')
+
+    printf '%s' "$messages"
+}
+
+save_messages() {
+    local conv_id="$1"
+    local messages="$2"
+    printf '%s' "$messages" > "$CONV_DIR/$conv_id.json"
+}
+
+list_conversations() {
+    ls "$CONV_DIR" 2>/dev/null | sed 's/\.json$//'
+}
+
+delete_conversation() {
+    local conv_id="$1"
+    rm -f "$CONV_DIR/$conv_id.json"
+    echo "🗑️  Conversation $conv_id deleted"
+}
+
+usage() {
+    echo "Usage:"
+    echo "  $0 <system_prompt> <prompt> [file1 file2 ...]              — nouvelle conversation"
+    echo "  $0 --resume <conv_id> <prompt> [file1 ...]  — reprendre une conversation"
+    echo "  $0 --list                                   — lister les conversations"
+    echo "  $0 --delete <conv_id>                       — supprimer une conversation"
+    exit 1
+}
+
+cd $WORKING_DIR
+
+case "$1" in
+    --list)
+        echo "📋 Conversations:" > /dev/tty
+        list_conversations | while read -r id; do
+            turns=$(jq 'length' "$CONV_DIR/$id.json")
+            echo "  $id  ($turns messages)" > /dev/tty
+        done
+        ;;
+
+    --delete)
+        [[ -z "$2" ]] && usage
+        delete_conversation "$2"
+        ;;
+
+    --resume)
+        [[ -z "$2" || -z "$3" ]] && usage
+        CONV_ID="$2"
+        PROMPT="$3"
+        shift 3
+        FILES=("$@")
+
+        if [[ ! -f "$CONV_DIR/$CONV_ID.json" ]]; then
+            echo "❌ Conversation not found: $CONV_ID" > /dev/tty
+            exit 1
+        fi
+
+        echo "📂 Resuming conversation: $CONV_ID" > /dev/tty
+        BASE_MESSAGES=$(load_messages "$CONV_ID")
+        MESSAGES=$(build_messages_with_files "$BASE_MESSAGES" "$PROMPT" "${FILES[@]}")
+        FINAL_MESSAGES=$($SCRIPT_DIR/run_agent.sh "$MESSAGES")
+        save_messages "$CONV_ID" "$FINAL_MESSAGES"
+
+        LAST_RESPONSE=$(printf '%s' "$FINAL_MESSAGES" | jq -r 'reverse | map(select(.role == "assistant")) | first | .content // ""')
+        echo "$LAST_RESPONSE"
+        ;;
+
+    *)
+        [[ -z "$2" ]] && usage
+        SYSTEM_PROMPT="$1"
+        shift
+        PROMPT="$1"
+        shift
+        FILES=("$@")
+
+        CONV_ID=$(date +%s%N)
+        echo "🆕 New conversation: $CONV_ID" > /dev/tty
+
+        MESSAGES=$(build_messages_with_files "$SYSTEM_PROMPT" "$PROMPT" "${FILES[@]}")
+        FINAL_MESSAGES=$($SCRIPT_DIR/run_agent.sh "$MESSAGES")
+        save_messages "$CONV_ID" "$FINAL_MESSAGES"
+
+        echo "" > /dev/tty
+        echo "💾 Conv ID: $CONV_ID" > /dev/tty
+        echo $CONV_ID
+        ;;
+esac

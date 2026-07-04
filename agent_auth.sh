@@ -1,5 +1,8 @@
 #!/bin/bash
 
+WORKING_DIR="$(pwd)"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
 AUTH_TOKEN_PATH=~/.config/github-copilot/hosts.json
 VSCODE_CLIENT_ID="Iv1.b507a08c87ecfe98";
 
@@ -54,4 +57,4 @@ if [ ! -f "$AUTH_TOKEN_PATH" ]; then
     done
 fi
 
-./token_exchange.sh
+$SCRIPT_DIR/token_exchange.sh
