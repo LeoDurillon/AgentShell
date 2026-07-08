@@ -1,0 +1,5 @@
+id: type-assertion
+language: Tsx
+
+rule:
+    pattern: $A as $B

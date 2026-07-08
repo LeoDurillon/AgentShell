@@ -1,0 +1,5 @@
+id: use-state
+language: Tsx
+
+rule:
+    pattern: useState($$$)

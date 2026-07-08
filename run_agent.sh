@@ -5,9 +5,9 @@ TEMP_FILE="$SCRIPT_DIR/copilot_token.json"
 TOKEN=$(jq -r '.token' "$TEMP_FILE")
 EXPIRES_AT=$(jq -r '.expires_at' "$TEMP_FILE")
 NOW=$(date +%s)
-TOOLS=$(cat "$SCRIPT_DIR/tools/tools.json")
+TOOLS=${2:-[]}
 
-MODEL="gpt-5-mini"
+MODEL="gpt-4o-mini"
 ENDPOINT="https://api.individual.githubcopilot.com"
 EDITOR_VERSION="vscode/1.107.0";
 EDITOR_PLUGIN_VERSION="copilot-chat/0.35.0";
@@ -40,6 +40,9 @@ if [ "$NOW" -ge "$EXPIRES_AT" ]; then
         echo "❌ Failed to renew token." > /dev/tty
         exit 1
     fi
+
+    TOKEN=$(jq -r '.token' "$TEMP_FILE")
+    EXPIRES_AT=$(jq -r '.expires_at' "$TEMP_FILE")
 fi
 
 
@@ -66,25 +69,27 @@ fi
      while IFS= read -r line; do
          [[ -z "$line" || "$line" == "data: [DONE]" ]] && continue
          [[ "${line:0:6}" != "data: " ]] && continue
-           json="${line#data: }"
-           chunk=$(printf '%s' "$json" | jq -rj \
-            'select(.choices[0].delta.content != null) | .choices[0].delta.content' 2>/dev/null)
-        [[ -n "$chunk" ]] && { printf '%s' "$chunk"; printf '%s' "$chunk" >> "$content_file"; }
-          tname=$(printf '%s' "$json" | jq -rj \
-            'select(.choices[0].delta.tool_calls != null) | .choices[0].delta.tool_calls[0].function.name // empty' 2>/dev/null)
-        [[ -n "$tname" && ! -s "$name_file" ]] && printf '🔧 %s...' "$tname" > /dev/tty
-        [[ -n "$tname" ]] && printf '%s' "$tname" >> "$name_file"
-          tid=$(printf '%s' "$json" | jq -rj \
-            'select(.choices[0].delta.tool_calls != null) | .choices[0].delta.tool_calls[0].id // empty' 2>/dev/null)
-        [[ -n "$tid" ]] && printf '%s' "$tid" >> "$id_file"
-          targs=$(printf '%s' "$json" | jq -rj \
-            'select(.choices[0].delta.tool_calls != null) | .choices[0].delta.tool_calls[0].function.arguments // empty' 2>/dev/null)
-        [[ -n "$targs" ]] && printf '%s' "$targs" >> "$args_file"
-          freason=$(printf '%s' "$json" | jq -rj \
-            'select(.choices[0].finish_reason != null) | .choices[0].finish_reason' 2>/dev/null)
-        [[ -n "$freason" ]] && echo "$freason" > "$finish_file"
+         json="${line#data: }"
 
-        [[ -n $chunk ]] && printf '%s' "$chunk" >&2
+         chunk=$(printf '%s' "$json" | jq -rj \
+             'select(.choices[0].delta.content != null) | .choices[0].delta.content' 2>/dev/null)
+         [[ -n "$chunk" ]] && { printf '%s' "$chunk" > /dev/tty; printf '%s' "$chunk" >> "$content_file"; }
+
+         printf '%s' "$json" | jq -c '.choices[0].delta.tool_calls[]? // empty' 2>/dev/null \
+         | while IFS= read -r tool_delta; do
+             i=$(printf '%s' "$tool_delta" | jq -r '.index // 0')
+             tname=$(printf '%s' "$tool_delta" | jq -rj '.function.name // empty')
+             tid=$(printf '%s' "$tool_delta" | jq -rj '.id // empty')
+             targs=$(printf '%s' "$tool_delta" | jq -rj '.function.arguments // empty')
+
+             [[ -n "$tname" ]] && printf '%s' "$tname" >> "${name_file}_$i"
+             [[ -n "$tid"   ]] && printf '%s' "$tid"   >> "${id_file}_$i"
+             [[ -n "$targs" ]] && printf '%s' "$targs" >> "${args_file}_$i"
+         done
+
+         freason=$(printf '%s' "$json" | jq -rj \
+             'select(.choices[0].finish_reason != null) | .choices[0].finish_reason' 2>/dev/null)
+         [[ -n "$freason" ]] && echo "$freason" > "$finish_file"
 
      done < <(curl -sS -N -X POST "$ENDPOINT/chat/completions" \
          -H "Content-Type: application/json" \
@@ -95,6 +100,11 @@ fi
          -H "Copilot-Integration-Id: $INTEGRATION_ID" \
          -d "$BODY")
      echo
+
+     TOOL_COUNT=0
+     for f in "${name_file}_"*; do
+         [[ -f "$f" ]] && TOOL_COUNT=$((TOOL_COUNT + 1))
+    done
 
      FINISH_REASON=$(cat "$finish_file")
      TOOL_CALL_NAME=$(cat "$name_file")
@@ -108,38 +118,57 @@ fi
             printf '%s' "$MESSAGES"
             exit 0
             ;;
+        tool_calls)
+         ASSISTANT_CONTENT=$(cat "$content_file")
 
-         tool_calls)
-             TOOL_RESULT=$("$DISPATCH" "$TOOL_CALL_NAME" "$TOOL_CALL_ARGS")
-             DISPATCH_EXIT=$?
+             # Construire le message assistant avec tous les tool calls
+             TOOL_CALLS_JSON="[]"
+             for i in $(seq 0 $((TOOL_COUNT - 1))); do
+                 TID=$(cat "${id_file}_$i" 2>/dev/null)
+                 TNAME=$(cat "${name_file}_$i" 2>/dev/null)
+                 TARGS=$(cat "${args_file}_$i" 2>/dev/null)
 
-             if [[ "$TOOL_CALL_NAME" == "done" ]]; then
-                 printf '%s' "$MESSAGES"
-                 break
-             fi
+                 TOOL_CALLS_JSON=$(printf '%s' "$TOOL_CALLS_JSON" | jq \
+                     --arg id "$TID" \
+                     --arg name "$TNAME" \
+                     --arg args "$TARGS" \
+                     '. += [{ id: $id, type: "function", function: { name: $name, arguments: $args } }]')
+             done
 
-             echo "✅ Result: $TOOL_RESULT" > /dev/tty
+             # Ajouter le message assistant avec tous les tool calls
              MESSAGES=$(printf '%s' "$MESSAGES" | jq \
                  --arg content "$ASSISTANT_CONTENT" \
-                 --arg tool_id "$TOOL_CALL_ID" \
-                 --arg tool_name "$TOOL_CALL_NAME" \
-                 --arg tool_args "$TOOL_CALL_ARGS" \
-                 --arg result "$TOOL_RESULT" \
-                 '. += [
-                     {
-                         role: "assistant",
-                         content: $content,
-                         tool_calls: [{
-                             id: $tool_id,
-                             type: "function",
-                             function: { name: $tool_name, arguments: $tool_args }
-                         }]
-                     },
-                     { role: "tool", tool_call_id: $tool_id, content: $result }
-                 ]')
+                 --argjson tool_calls "$TOOL_CALLS_JSON" \
+                 '. += [{ role: "assistant", content: $content, tool_calls: $tool_calls }]')
 
+             # Exécuter chaque tool et ajouter son résultat
+             DONE_CALLED=false
+             for i in $(seq 0 $((TOOL_COUNT - 1))); do
+                 TID=$(cat "${id_file}_$i" 2>/dev/null)
+                 TNAME=$(cat "${name_file}_$i" 2>/dev/null)
+                 TARGS=$(cat "${args_file}_$i" 2>/dev/null)
+
+                 rm -f "${name_file}_$i" "${id_file}_$i" "${args_file}_$i"
+
+                 if [[ "$TNAME" == "done" || "$TNAME" == "feature_complete" ]]; then
+                     DONE_CALLED=true
+                     TOOL_RESULT="acknowledged"
+                 else
+                     TOOL_RESULT=$("$DISPATCH" "$TNAME" "$TARGS")
+                 fi
+
+                 # Chaque tool call doit avoir sa propre réponse tool
+                 MESSAGES=$(printf '%s' "$MESSAGES" | jq \
+                     --arg tool_id "$TID" \
+                     --arg result "$TOOL_RESULT" \
+                     '. += [{ role: "tool", tool_call_id: $tool_id, content: $result }]')
+             done
+
+             if $DONE_CALLED; then
+                 printf '%s' "$MESSAGES"
+                 exit 0
+             fi
              ;;
-
          *)
             echo "❌ Unexpected finish_reason: $FINISH_REASON"  > /dev/tty
             echo $FINISH_REASON > /dev/tty

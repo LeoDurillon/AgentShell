@@ -1,0 +1,5 @@
+id: use-effect
+language: Tsx
+
+rule:
+    pattern: useEffect($$$)

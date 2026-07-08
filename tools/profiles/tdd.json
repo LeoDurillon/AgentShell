@@ -3,20 +3,35 @@
         "type": "function",
         "function": {
             "name": "edit_file",
-            "description": "Apply changes to a file using the OpenAI patch format",
+            "description": "Edit a file by inserting, replacing or deleting lines. All operations are applied bottom-to-top so line numbers stay valid.",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "path": {
-                        "type": "string",
-                        "description": "Path to the file relative to project root"
-                    },
-                    "diff": {
-                        "type": "string",
-                        "description": "Patch in OpenAI format:\n*** Begin Patch\n*** Add File: path/to/new/file\n+content line 1\n+content line 2\n*** End Patch\n\nFor editing existing files:\n*** Begin Patch\n*** Update File: path/to/file\n@@\n context line\n-removed line\n+added line\n*** End Patch"
+                    "path": { "type": "string" },
+                    "operations": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "type": {
+                                    "type": "string",
+                                    "enum": ["insert", "replace", "delete"],
+                                    "description": "insert: add lines BEFORE line number. replace: replace line with new content. delete: remove line."
+                                },
+                                "line": {
+                                    "type": "integer",
+                                    "description": "Target line number (1-based)"
+                                },
+                                "content": {
+                                    "type": "string",
+                                    "description": "Line(s) to insert or replace with. Not needed for delete."
+                                }
+                            },
+                            "required": ["type", "line"]
+                        }
                     }
                 },
-                "required": ["path", "diff"]
+                "required": ["path", "operations"]
             }
         }
     },

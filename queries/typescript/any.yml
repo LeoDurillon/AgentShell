@@ -1,0 +1,5 @@
+id: explicit-any
+language: Tsx
+
+rule:
+    pattern: any

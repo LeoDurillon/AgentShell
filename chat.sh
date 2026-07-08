@@ -22,29 +22,64 @@ build_messages_with_files() {
     local prompt="$2"
     shift 2
     local files=("$@")
-    if ! printf '%s' "$base_messages" | jq -e . >/dev/null 2>&1; then
-        base_messages=$(jq -n --arg system "$base_messages" \
-            '[{ role: "system", content: $system }]')
-    fi
 
     local messages="$base_messages"
 
-    # Injecter les fichiers comme messages user séparés
     for file in "${files[@]}"; do
         if [[ -f "$file" ]]; then
-            messages=$(printf '%s' "$messages" | jq \
+            filename=$(basename "$file")
+
+            if [[ "$filename" =~ ^(CLAUDE|AGENTS|INSTRUCTIONS|\.cursorrules)(\.md)?$ ]]; then
+                tag="instructions"
+                role="system"
+                content_wrap="<instructions path=\"\($path)\">\n\($content)\n</instructions>"
+            else
+                tag="file"
+                role="user"
+                content_wrap="<file path=\"\($path)\">\n\`\`\`\n\($content)\`\`\`\n</file>"
+            fi
+
+            local already_present
+            already_present=$(printf '%s' "$messages" | jq \
                 --arg path "$file" \
-                --rawfile content "$file" \
-                '. += [{
-                    role: "user",
-                    content: "<file path=\"\($path)\">\n```\n\($content)```\n</file>"
-                }]')
+                --arg tag "$tag" \
+                'any(.[];
+                    .content != null and
+                    (.content | type) == "string" and
+                    (.content | startswith("<" + $tag + " path=\"" + $path + "\""))
+                )')
+
+            if [[ "$already_present" == "true" ]]; then
+                messages=$(printf '%s' "$messages" | jq \
+                    --arg path "$file" \
+                    --arg tag "$tag" \
+                    --rawfile content "$file" \
+                    'map(
+                        if (.content != null and
+                            (.content | type == "string") and
+                            startswith("<" + $tag + " path=\"" + $path + "\""))
+                        then .content = ("<" + $tag + " path=\"" + $path + "\">\n```\n" + $content + "```\n</" + $tag + ">")
+                        else .
+                        end
+                    )')
+                echo "🔄 Updated $file in context" > /dev/tty
+            else
+                messages=$(printf '%s' "$messages" | jq \
+                    --arg path "$file" \
+                    --arg role "$role" \
+                    --arg tag "$tag" \
+                    --rawfile content "$file" \
+                    '. += [{
+                        role: $role,
+                        content: ("<" + $tag + " path=\"" + $path + "\">\n```\n" + $content + "```\n</" + $tag + ">")
+                    }]')
+                echo "📄 Added $file to context" > /dev/tty
+            fi
         else
-            echo "⚠️  File not found, skipping: $file" >&2
+            echo "⚠️  File not found, skipping: $file" > /dev/tty
         fi
     done
 
-    # Ajouter le prompt utilisateur après les fichiers
     messages=$(printf '%s' "$messages" | jq \
         --arg prompt "$prompt" \
         '. += [{ role: "user", content: $prompt }]')
@@ -78,6 +113,15 @@ usage() {
 }
 
 cd $WORKING_DIR
+TOOLS=""
+if [[ "$1" = "--tools" ]]; then
+    if [ ! -f $2 ]; then
+        echo "⚠️  Tools file not found: $2" > /dev/tty
+        exit 1
+    fi
+    TOOLS=$(cat "$2")
+    shift 2
+fi
 
 case "$1" in
     --list)
@@ -108,7 +152,7 @@ case "$1" in
         echo "📂 Resuming conversation: $CONV_ID" > /dev/tty
         BASE_MESSAGES=$(load_messages "$CONV_ID")
         MESSAGES=$(build_messages_with_files "$BASE_MESSAGES" "$PROMPT" "${FILES[@]}")
-        FINAL_MESSAGES=$($SCRIPT_DIR/run_agent.sh "$MESSAGES")
+        FINAL_MESSAGES=$($SCRIPT_DIR/run_agent.sh "$MESSAGES" "$TOOLS")
         save_messages "$CONV_ID" "$FINAL_MESSAGES"
 
         LAST_RESPONSE=$(printf '%s' "$FINAL_MESSAGES" | jq -r 'reverse | map(select(.role == "assistant")) | first | .content // ""')
@@ -118,16 +162,19 @@ case "$1" in
     *)
         [[ -z "$2" ]] && usage
         SYSTEM_PROMPT="$1"
-        shift
-        PROMPT="$1"
-        shift
+        PROMPT="$2"
+        shift 2
         FILES=("$@")
 
         CONV_ID=$(date +%s%N)
         echo "🆕 New conversation: $CONV_ID" > /dev/tty
 
-        MESSAGES=$(build_messages_with_files "$SYSTEM_PROMPT" "$PROMPT" "${FILES[@]}")
-        FINAL_MESSAGES=$($SCRIPT_DIR/run_agent.sh "$MESSAGES")
+        BASE_MESSAGES=$(jq -n --arg system "$SYSTEM_PROMPT" \
+                '[{ role: "system", content: $system }]')
+
+        MESSAGES=$(build_messages_with_files "$BASE_MESSAGES" "$PROMPT" "${FILES[@]}")
+        echo "💬 Sending messages to agent..." > /dev/tty
+        FINAL_MESSAGES=$($SCRIPT_DIR/run_agent.sh "$MESSAGES" "$TOOLS")
         save_messages "$CONV_ID" "$FINAL_MESSAGES"
 
         echo "" > /dev/tty

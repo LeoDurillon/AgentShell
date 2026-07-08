@@ -1,0 +1,7 @@
+id: jsx-conditional
+language: Tsx
+
+rule:
+  any:
+    - pattern: $COND ? $A : $B
+    - pattern: $COND && $A

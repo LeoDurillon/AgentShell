@@ -1,0 +1,9 @@
+id: inline-callback
+language: Tsx
+
+rule:
+    pattern: |
+        <$A
+          $PROP={() => $$$}
+          $$$
+        />

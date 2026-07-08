@@ -1,0 +1,5 @@
+id: use-context
+language: Tsx
+
+rule:
+    pattern: useContext($$$)

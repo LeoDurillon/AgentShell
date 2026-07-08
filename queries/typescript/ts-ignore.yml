@@ -1,0 +1,5 @@
+id: ts-ignore
+language: Tsx
+
+rule:
+    pattern: "// @ts-ignore"

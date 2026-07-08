@@ -1,0 +1,45 @@
+[
+    {
+        "type": "function",
+        "function": {
+            "name": "add_refactor_comment",
+            "description": "Insert a REFACTOR comment above a specific line. This tool cannot modify existing code.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "path": { "type": "string" },
+                    "line": {
+                        "type": "integer",
+                        "description": "1-based line number to insert the comment before"
+                    },
+                    "category": {
+                        "type": "string",
+                        "enum": [
+                            "general",
+                            "complexity",
+                            "duplication",
+                            "type",
+                            "convention"
+                        ]
+                    },
+                    "suggestion": { "type": "string" }
+                },
+                "required": ["path", "line", "category", "suggestion"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "done",
+            "description": "Call this when no more refactor comments should be added.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "summary": { "type": "string" }
+                },
+                "required": ["summary"]
+            }
+        }
+    }
+]

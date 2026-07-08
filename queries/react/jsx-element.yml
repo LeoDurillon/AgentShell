@@ -1,0 +1,5 @@
+id: jsx-element
+language: Tsx
+
+rule:
+    kind: jsx_element

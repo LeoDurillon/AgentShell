@@ -1,0 +1,5 @@
+id: jsx-fragment
+language: Tsx
+
+rule:
+    kind: jsx_fragment

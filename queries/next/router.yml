@@ -1,0 +1,5 @@
+id: router
+language: Tsx
+
+rule:
+    pattern: useRouter()

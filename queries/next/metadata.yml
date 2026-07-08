@@ -1,0 +1,5 @@
+id: metadata
+language: Tsx
+
+rule:
+    pattern: export const metadata = $$$

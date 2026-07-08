@@ -1,0 +1,5 @@
+id: use-memo
+language: Tsx
+
+rule:
+    pattern: useMemo($$$)

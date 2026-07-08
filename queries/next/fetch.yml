@@ -1,0 +1,5 @@
+id: fetch
+language: Tsx
+
+rule:
+    pattern: fetch($$$)

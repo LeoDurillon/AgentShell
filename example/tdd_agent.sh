@@ -97,10 +97,10 @@ copilot_call() {
         if [ -z "$CONV_ID" ]; then
             # Capturer seulement le CONV_ID depuis stdout (dernière ligne)
             # Le reste va sur /dev/tty via run_agent.sh
-            CONV_ID=$("$SCRIPT_DIR/../chat.sh" "$COPILOT_PROMPT" "$prompt" "$TEST_FILE" "$FEAT_FILE")
+            CONV_ID=$("$SCRIPT_DIR/../chat.sh" --tools $SCRIPT_DIR/../tools/profiles/tdd.json "$COPILOT_PROMPT" "$prompt" "$TEST_FILE" "$FEAT_FILE")
             echo "📝 Conv ID: $CONV_ID" > /dev/tty
         else
-            "$SCRIPT_DIR/../chat.sh" --resume "$CONV_ID" "$prompt" "$TEST_FILE" "$FEAT_FILE"
+            "$SCRIPT_DIR/../chat.sh" --tools $SCRIPT_DIR/../tools/profiles/tdd.json --resume "$CONV_ID" "$prompt" "$TEST_FILE" "$FEAT_FILE"
         fi
 }
 
