@@ -61,10 +61,6 @@ collect_next_metrics() {
 
 generate_signals() {
 
-    #
-    # TypeScript
-    #
-
     if (( any_count >= 5 )); then
         add_signal "🔴" "Heavy use of explicit any (${any_count})"
     elif (( any_count > 0 )); then
@@ -88,10 +84,6 @@ generate_signals() {
     elif (( non_null >= 3 )); then
         add_signal "🟡" "Several non-null assertions (${non_null})"
     fi
-
-    #
-    # React
-    #
 
     if (( use_state >= 8 )); then
         add_signal "🔴" "Very high state usage (${use_state} useState)"
@@ -140,10 +132,6 @@ generate_signals() {
     elif (( fragments >= 4 )); then
         add_signal "🟡" "Several JSX fragments (${fragments})"
     fi
-
-    #
-    # Next.js
-    #
 
     if (( fetch_count >= 5 )); then
         add_signal "🔴" "Many fetch() calls (${fetch_count})"

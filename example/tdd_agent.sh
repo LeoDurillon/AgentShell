@@ -76,17 +76,23 @@ Follow this exact decision tree on every turn:
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-if [ -z "$1" ] || [ ! -f "$1" ]; then
-    echo "Error: Invalid test file path: '$1'" >&2
-    exit 1
-fi
-if [ -z "$2" ] || [ ! -f "$2" ]; then
-    echo "Error: Invalid implementation file path: '$2'" >&2
+TEST_FILE=$(fd -e ts -e tsx -E node_modules | fzf --prompt="Select test file: ")
+if [ -z "$TEST_FILE" ] || [ ! -f "$TEST_FILE" ]; then
+    echo "Error: Invalid test file path: '$TEST_FILE'" >&2
     exit 1
 fi
 
-TEST_FILE="$1"
-FEAT_FILE="$2"
+FEAT_FILE=$(fd -e ts -e tsx -E node_modules -E $TEST_FILE | fzf --prompt="Select feature file: ")
+
+if [ -z "$FEAT_FILE" ] || [ ! -f "$FEAT_FILE" ]; then
+    echo "Error: Invalid implementation file path: '$FEAT_FILE'" >&2
+    exit 1
+fi
+
+mapfile -t CONTEXT_FILES < <(
+    fd --hidden -e md -E node_modules \
+        | fzf --multi --prompt="Select context files: "
+)
 LOOP_COUNT=0
 CONV_ID=""
 TEST_FILE_CONTENT=$(cat "$TEST_FILE")
@@ -95,12 +101,10 @@ copilot_call() {
     local prompt="$1"
 
         if [ -z "$CONV_ID" ]; then
-            # Capturer seulement le CONV_ID depuis stdout (dernière ligne)
-            # Le reste va sur /dev/tty via run_agent.sh
-            CONV_ID=$("$SCRIPT_DIR/../chat.sh" --tools $SCRIPT_DIR/../tools/profiles/tdd.json "$COPILOT_PROMPT" "$prompt" "$TEST_FILE" "$FEAT_FILE")
+            CONV_ID=$("$SCRIPT_DIR/../chat.sh" --tools $SCRIPT_DIR/../tools/profiles/tdd.json "$COPILOT_PROMPT" "$prompt" "$TEST_FILE" "$FEAT_FILE" "${CONTEXT_FILES[@]}")
             echo "📝 Conv ID: $CONV_ID" > /dev/tty
         else
-            "$SCRIPT_DIR/../chat.sh" --tools $SCRIPT_DIR/../tools/profiles/tdd.json --resume "$CONV_ID" "$prompt" "$TEST_FILE" "$FEAT_FILE"
+            "$SCRIPT_DIR/../chat.sh" --tools $SCRIPT_DIR/../tools/profiles/tdd.json --resume "$CONV_ID" "$prompt" "$TEST_FILE" "$FEAT_FILE" "${CONTEXT_FILES[@]}"
         fi
 }
 

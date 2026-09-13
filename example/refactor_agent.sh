@@ -46,16 +46,6 @@ Rules:
 - Prefer fewer high-value comments over many low-value comments.
 - If no meaningful comments exist, call done."
 
-if [ -z "$1" ]; then
-    echo "Usage: $0 <file_path> [conv_id]"
-    exit 1
-fi
-
-if [ ! -f "$1" ]; then
-    echo "File not found: $1"
-    exit 1
-fi
-
 # Vérifier les outils requis
 MISSING_TOOLS=()
 command -v tsc     >/dev/null 2>&1 || MISSING_TOOLS+=("tsc (typescript)")
@@ -78,7 +68,8 @@ FILES=""
 CONV_ID=""
 case "$FIRST_ARG" in
     --help|-h)
-        echo "Usage: $0 <file_path> [conv_id]"
+        echo "Usage: $0"
+        echo "Usage: $0 <file_path>"
         echo "Usage: $0 --resume [conv_id] <file_path>"
         echo "  <file_path>: Path to the file to analyze and refactor"
         echo "  [conv_id]: Optional conversation ID to resume an existing refactor session"
@@ -91,11 +82,18 @@ case "$FIRST_ARG" in
         fi
         CONV_ID="$2"
         shift 2
-        FILE="$1"
         ;;
     *)
-        FILE="$1"
+    ;;
 esac
+
+if [ -z "$1" ]; then
+    FILE=$(fd -e ts -e tsx -E node_modules | fzf --prompt="Select file to refactor: ")
+else
+    FILE="$1"
+fi
+
+mapfile -t CONTEXT_FILES < <(fd --hidden -e md -E node_modules | fzf --multi --prompt="Select context files (optional): ")
 
 FILE_NAME=$(basename "$FILE")
 
@@ -205,11 +203,11 @@ echo $TOOL_OUTPUT
 
 if [ -z "$CONV_ID" ]; then
     # Nouvelle conversation → stdout = conv_id
-    CONV_ID=$("$SCRIPT_DIR/../chat.sh" --tools $SCRIPT_DIR/../tools/profiles/refactor.json "$COPILOT_PROMPT" "$TOOL_OUTPUT" $@)
+    CONV_ID=$("$SCRIPT_DIR/../chat.sh" --tools $SCRIPT_DIR/../tools/profiles/refactor.json "$COPILOT_PROMPT" "$TOOL_OUTPUT" "${CONTEXT_FILES[@]}")
     echo "💾 Conv ID: $CONV_ID" > /dev/tty
 else
     # Reprendre → stdout = dernière réponse
-    "$SCRIPT_DIR/../chat.sh" --tools $SCRIPT_DIR/../tools/profiles/refactor.json --resume "$CONV_ID" "$TOOL_OUTPUT" $@
+    "$SCRIPT_DIR/../chat.sh" --tools $SCRIPT_DIR/../tools/profiles/refactor.json --resume "$CONV_ID" "$TOOL_OUTPUT" "${CONTEXT_FILES[@]}"
 fi
 
 echo "$CONV_ID"
